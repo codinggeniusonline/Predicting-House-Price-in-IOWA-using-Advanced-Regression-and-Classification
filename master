@@ -1,0 +1,288 @@
+
+library(dplyr)
+library(caTools)
+library(ggplot2)
+library(readxl)
+library(Hmisc)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(plyr)
+library(readxl)
+library(Hmisc) 
+library(leaps) 
+
+set.seed(42)
+
+setwd("C:/Users/shreyas/Desktop/BA with R/sarath playground")
+finalprojectdata = read.csv("wonder15.csv")
+projectdata<-finalprojectdata  
+head(projectdata)
+str(projectdata)
+describe(projectdata)
+describe(projectdata$Alley)
+projectdata$Alley<-NULL
+projectdata$PoolQC<-NULL
+projectdata$Fence<-NULL
+projectdata$MiscFeature<-NULL
+describe(projectdata)
+describe(projectdata$LotFrontage)
+ggplot(projectdata,aes(x=LotFrontage))+geom_density(fill = "blue", alpha = "0.7")
+
+#Using regression to replace the zeros in LotFrontage variable
+Data_1 <- projectdata %>% filter(LotFrontage != 0)
+imputereg1<- lm(LotFrontage~SalePrice+LotArea+BsmtFinSF1+BsmtUnfSF+GarageYrBlt+PoolArea, data = Data_1)
+summary(imputereg1)
+
+for(i in 1:nrow(projectdata)){
+  if(is.na(projectdata[i, "LotFrontage"])){
+    projectdata[i, "LotFrontage"] = predict(imputereg1, newdata = projectdata[i, ])
+  }
+}
+describe(projectdata$LotFrontage)
+
+#MEAN SUBSTITUTUION
+MeanItem_Weight <- mean(projectdata$LotFrontage[!is.na(projectdata$LotFrontage)])
+projectdata$LotFrontage[is.na(projectdata$LotFrontage)] <- MeanItem_Weight
+describe(projectdata$LotFrontage)
+
+##CATEGORICAL IMOUTATION 
+
+sescount <- count(projectdata, c('MasVnrType'))
+sesmax <- sescount[which.max(sescount$freq), c('MasVnrType')]
+projectdata$MasVnrType <- replace(projectdata$MasVnrType, is.na(projectdata$MasVnrType), sesmax)
+
+describe(projectdata$MasVnrArea)
+MeanItem_Weight1 <- mean(projectdata$MasVnrArea[!is.na(projectdata$MasVnrArea)])
+projectdata$MasVnrArea[is.na(projectdata$MasVnrArea)] <- MeanItem_Weight
+
+describe(projectdata$Electrical)
+projectdata$Electrical[is.na(projectdata$Electrical)]<-projectdata$Electrical[projectdata$Electrical=='FuseA']
+
+##imputation of categorical variables again
+
+describe(projectdata$Utilities)
+
+table(is.na(projectdata$Utilities))
+
+describe(projectdata$MasVnrType)
+
+col.pred <- c("BldgType", "HouseStyle","OverallQual", "OverallCond", "YearBuilt", "MasVnrType","YearRemodAdd", "ExterQual", "ExterCond","BsmtQual",
+              
+              "BsmtCond","GarageQual", "GarageCond","SaleType", "SaleCondition", "Functional", "WoodDeckSF", "OpenPorchSF", "EnclosedPorch", "X3SsnPorch", "ScreenPorch", "PoolArea","Utilities")
+
+util.rpart <- rpart(as.factor(Utilities) ~ .,
+                    
+                    data = projectdata[!is.na(projectdata$Utilities),col.pred],
+                    
+                    method = "class",
+                    
+                    na.action=na.omit)
+
+
+projectdata$Utilities[is.na(projectdata$Utilities)] <- as.character(predict(util.rpart, projectdata[is.na(projectdata$Utilities),col.pred], type = "class"))
+
+
+##end
+
+describe(projectdata)
+
+#outlier values removal
+
+outlier_values1 <- boxplot.stats(projectdata$LotArea)$out
+outlier_values1 <- sort(outlier_values1)
+boxplot(projectdata$LotArea, main="AGE", boxwex=1)
+mtext(paste("Outliers: ", paste(outlier_values1, collapse=", ")), cex=0.8)
+
+
+outlier_values2 <- boxplot.stats(projectdata$MasVnrArea)$out
+outlier_values2 <- sort(outlier_values2)
+outlier_values2
+describe(projectdata$MasVnrArea)
+
+
+outlierKD <- function(dt, var) {
+  var_name <- eval(substitute(var),eval(dt))
+  na1 <- sum(is.na(var_name))
+  m1 <- mean(var_name, na.rm = T)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+  outlier <- boxplot.stats(var_name)$out
+  mo <- mean(outlier)
+  var_name <- ifelse(var_name %in% outlier, NA, var_name)
+  boxplot(var_name, main="Without outliers")
+  hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+  title("Outlier Check", outer=TRUE)
+  na2 <- sum(is.na(var_name))
+  cat("Outliers identified:", na2 - na1, "n")
+  cat("Propotion (%) of outliers:", round((na2 - na1) / sum(!is.na(var_name))*100, 1), "n")
+  cat("Mean of the outliers:", round(mo, 2), "n")
+  m2 <- mean(var_name, na.rm = T)
+  cat("Mean without removing outliers:", round(m1, 2), "n")
+  cat("Mean if we remove outliers:", round(m2, 2), "n")
+  response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+  if(response == "y" | response == "yes"){
+    dt[as.character(substitute(var))] <- invisible(var_name)
+    assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+    cat("Outliers successfully removed", "n")
+    return(invisible(dt))
+  } else{
+    cat("Nothing changed", "n")
+    return(invisible(var_name))
+  }
+}
+
+outlierKD(projectdata, LotArea)
+outlierKD(projectdata, LotFrontage)
+outlierKD(projectdata, MaSVnrArea)
+projectdata$MasVnrArea[projectdata$MasVnrArea > 411] = NA
+
+# Correlation Matrix 
+library(corrgram)
+corrgram(projectdata, order=NULL, lower.panel=panel.shade,
+         upper.panel=NULL, text.panel=panel.txt,
+         main="Correlation Matrix")
+
+names(projectdata)
+
+ggplot(projectdata)+aes(x=YearBuilt,y=SalePrice,colour=OverallCond)+geom_point()
+
+describe(projectdata)
+  
+#Partition data into 70, 15 and 15 ratio
+trainfrac <- 0.7
+valfrac <- 0.15
+testfrac <- 0.15
+
+sampleSizeTraining <- floor(trainfrac * nrow(projectdata))
+sampleSizeValidation <- floor(valfrac * nrow(projectdata))
+sampleSizeTest <- floor(testfrac * nrow(projectdata))
+
+indicesTraining <- sort(sample(seq_len(nrow(projectdata)), size=sampleSizeTraining))
+indicesNotTraining <- setdiff(seq_len(nrow(projectdata)), indicesTraining)
+indicesValidation <- sort(sample(indicesNotTraining, size=sampleSizeValidation))
+indicesTest <- setdiff(indicesNotTraining, indicesValidation)
+
+Projecttrain <- projectdata[indicesTraining, ]
+Projectval <- projectdata[indicesValidation, ]
+Projecttest <- projectdata[indicesTest, ]
+
+nrow(Projecttrain)
+nrow(Projectval)
+nrow(Projecttest)
+
+#Regression model for predicting house prices
+
+names(Projecttrain)
+
+salemodel<-lm( SalePrice ~ Neighborhood + OverallQual + MasVnrArea + X1stFlrSF + X2ndFlrSF + WoodDeckSF + KitchenQual + BsmtExposure + BsmtFinSF1 + RoofMatl + GarageArea + ScreenPorch + Condition2 + Condition1 + LotConfig  + OverallCond, data = Projecttrain)
+summary(salemodel)
+
+Predicted VS actual salesprice plot
+result<-predict(salemodel, newdata = Projectval)
+plot(result,Projectval$SalePrice)
+abline(lm(result~Projectval$SalePrice))
+
+Predicted vs actual table
+
+resultset<-paste(Projectval$SalePrice,result)
+resultset
+
+# decision tree calssification
+
+dtprojectdata<-projectdata
+describe(dtprojectdata)
+mean(dtprojectdata$SalePrice)
+describe(dtprojectdata$SalePrice)
+
+for(i in 1:nrow(dtprojectdata)){
+ if(dtprojectdata[i, "SalePrice"]>163000){
+    dtprojectdata[i, "SalePricedtree"] = 1
+  }else {dtprojectdata[i, "SalePricedtree"] = 0} 
+}
+
+describe(dtprojectdata$SalePricedtree)
+dtprojectdata$SalePrice<-NULL
+
+write.csv(dtprojectdata, file="randomforestproject.csv", row.name=TRUE)
+
+#Randomize the data
+rand <- runif(nrow(dtprojectdata)) 
+dtprojectdatarand <- dtprojectdata[order(rand), ]
+
+#Partition data
+dtprojectdatatrain <- dtprojectdatarand[1:1022, ]
+dtprojectdataval <- dtprojectdatarand[1023:1241, ]
+dtprojectdatatest <- dtprojectdatarand[1242:1460, ]
+
+#Build decision tree
+projecttree <- rpart(SalePricedtree ~ ., data = dtprojectdatatrain, method = "class")
+projecttree
+printcp(projecttree)
+plotcp(projecttree)
+
+
+
+#Evaluate tree performance
+dtprojectdatatrain$treepred <- predict(projecttree, dtprojectdatatrain, type = "class")
+table(Actual = dtprojectdatatrain$SalePricedtree, Predicted = dtprojectdatatrain$treepred)
+
+dtprojectdatatrain$treepredcorrect <- dtprojectdatatrain$SalePricedtree == dtprojectdatatrain$treepred 
+traintreecorrectcount <- length(which(dtprojectdatatrain$treepredcorrect))
+traintreeincorrectcount <- nrow(dtprojectdatatrain) - traintreecorrectcount
+traintreeerrorrate <- traintreeincorrectcount/nrow(dtprojectdatatrain)
+traintreeaccuracy <- 1-traintreeerrorrate
+
+dtprojectdataval$treepred <- predict(projecttree, dtprojectdataval, type = "class")
+table(Actual = dtprojectdataval$SalePricedtree, Predicted = dtprojectdataval$treepred)
+
+dtprojectdataval$treepredcorrect <- dtprojectdataval$SalePricedtree == dtprojectdataval$treepred 
+testtreecorrectcount <- length(which(dtprojectdataval$treepredcorrect))
+testtreeincorrectcount <- nrow(dtprojectdataval) - testtreecorrectcount
+testtreeerrorrate <- testtreeincorrectcount/nrow(dtprojectdataval)
+testtreeaccuracy <- 1-testtreeerrorrate
+
+#Compare
+paste("TREE TRAIN: Error Rate (", traintreeerrorrate, ") Accuracy (", traintreeaccuracy, ")")
+paste("TREE TEST: Error Rate (", testtreeerrorrate, ") Accuracy (", testtreeaccuracy, ")")
+
+#Random forest classification
+library(randomForest)
+rfprojectdata<-read.csv("randomforestproject.csv")
+
+#Randomize the data
+rand <- runif(nrow(rfprojectdata)) 
+rfprojectdatarand <- rfprojectdata[order(rand), ]
+
+#Partition data into 70, 15, 15
+rfprojectdatatrain <- rfprojectdatarand[1:1022, ]
+rfprojectdataval <- rfprojectdatarand[1023:1241, ]
+rfprojectdatatest <- rfprojectdatarand[1242:1460, ]
+
+rftraindata<-rfprojectdatatrain
+rfvaldata<-rfprojectdataval
+rftestdata <- rfprojectdatatest
+
+rftrain <- randomForest(as.factor(SalePricedtree) ~ ., data = rftraindata, ntree = 800,na.action = na.roughfix)
+predictforest<- predict(rftrain,newdata = rfvaldata)
+table(rfvaldata$SalePricedtree,predictforest)
+
+
+##Clustering the houses into different clusters
+
+names(projectdata)
+write.csv(projectdata, file="clusterforestproject.csv", row.name=TRUE)
+
+clusterdataset<-read.csv("clusterforestproject.csv")
+
+clust.pred<-c("LotFrontage", "LotArea","OverallQual","OverallCond","YearBuilt","MasVnrArea","BsmtQual","BsmtExposure","TotalBsmtSF","SalePrice")
+
+housingcluster<-kmeans(clusterdataset[,clust.pred], 4, nstart = 20)
+housingcluster$cluster
+out <- cbind(clsuterdataset, clusterNum = housingcluster$cluster)
+head(out)
+
+
+
+
